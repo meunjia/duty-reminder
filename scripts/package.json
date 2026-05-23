@@ -1,0 +1,9 @@
+{
+  "name": "duty-reminder-scripts",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "date-holidays": "^3.23.14",
+    "firebase-admin": "^13.4.0"
+  }
+}

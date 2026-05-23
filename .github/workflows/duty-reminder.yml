@@ -1,0 +1,47 @@
+name: Duty Reminder
+
+on:
+  schedule:
+    - cron: '50 8 * * *'   # KST 17:50 — 근무일지
+    - cron: '10 23 * * *'  # KST 08:10 익일 — 견사정비
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'duty1 or duty2'
+        required: true
+        default: 'duty1'
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+        working-directory: scripts
+
+      - name: Run duty1 (17:50 KST)
+        if: github.event_name == 'schedule' && github.event.schedule == '50 8 * * *'
+        run: node duty-reminder.mjs duty1
+        working-directory: scripts
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Run duty2 (08:10 KST)
+        if: github.event_name == 'schedule' && github.event.schedule == '10 23 * * *'
+        run: node duty-reminder.mjs duty2
+        working-directory: scripts
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Run manual
+        if: github.event_name == 'workflow_dispatch'
+        run: node duty-reminder.mjs ${{ github.event.inputs.mode }}
+        working-directory: scripts
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
