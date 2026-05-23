@@ -98,9 +98,24 @@ const yesterdayDate = new Date(nowKST.getUTCFullYear(), nowKST.getUTCMonth(), no
 const yesterday = toDateString(yesterdayDate)
 
 if (MODE === 'duty1') {
-  // 당직 당일 17:50 KST — 근무일지 알림
   await sendToCalendarsWithShift(today, '당', '📋 근무일지 알림', '10분 후 근무일지 올리세요!')
 } else if (MODE === 'duty2') {
-  // 당직 익일 08:10 KST — 견사정비 알림
   await sendToCalendarsWithShift(yesterday, '당', '🐕 견사정비 알림', '견사정비 이상유무 올릴 시간이에요!')
+} else if (MODE === 'test') {
+  // 근무 조건 없이 토큰이 있는 모든 캘린더에 테스트 알림 발송
+  const snap = await db.collection('calendars').get()
+  const tokenMap = new Map()
+  for (const calDoc of snap.docs) {
+    const tokensSnap = await calDoc.ref.collection('fcmTokens').get()
+    for (const d of tokensSnap.docs) {
+      const token = d.data().token
+      if (token && !tokenMap.has(token)) tokenMap.set(token, d.ref)
+    }
+  }
+  if (tokenMap.size === 0) { console.log('no tokens found'); process.exit(0) }
+  const tokens = [...tokenMap.keys()]
+  const response = await messaging.sendEachForMulticast({
+    tokens, notification: { title: '🔔 테스트 알림', body: '알림이 정상 동작합니다!' }
+  })
+  console.log(`test: sent ${response.successCount}/${tokens.length}`)
 }

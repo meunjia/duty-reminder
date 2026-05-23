@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'duty1 or duty2'
+        description: 'duty1, duty2, or test'
         required: true
-        default: 'duty1'
+        default: 'test'
 
 jobs:
   remind:

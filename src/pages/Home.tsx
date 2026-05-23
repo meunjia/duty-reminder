@@ -112,6 +112,7 @@ export default function Home({ onNavigate: _onNavigate }: HomeProps) {
     : null
   const retireHomeArrival = retireTime !== null && returnCommuteMin !== null ? addMins(retireTime, returnCommuteMin) : null
   const nowHomeArrival = returnCommuteMin !== null ? addMins(nowStr, returnCommuteMin) : null
+  const nowWorkArrival = commuteMin !== null ? addMins(nowStr, commuteMin) : null
 
   const weekDays = Array.from({ length: 7 }, (_, i) => {
     const d = addDays(today, i)
@@ -221,7 +222,7 @@ export default function Home({ onNavigate: _onNavigate }: HomeProps) {
               <TimeBlock
                 label="🏠 귀가 도착"
                 value={returnCommuteMin !== null ? addMins('09:00', returnCommuteMin) : null}
-                sub={returnCommuteMin !== null ? `소요 ${returnCommuteMin}분` : undefined}
+                sub={returnCommuteMin !== null ? `소요 ${returnCommuteMin}분` : (!selectedLocId ? '출발지 설정' : undefined)}
                 color="#a5f3fc"
                 flex
               />
@@ -229,20 +230,29 @@ export default function Home({ onNavigate: _onNavigate }: HomeProps) {
           ) : todayShift === '비' ? (
             <p style={{ fontSize: 19, fontWeight: 700, opacity: 0.88, margin: 0 }}>🏖️ 비번</p>
           ) : isBeforeEleven ? (
-            // 오전: 기상 + 출발 (당직이면 익일퇴근 추가)
+            // 오전: 기상 + (당직이면 출발+익일퇴근, 아니면 지금출발→도착예정)
             <div style={{ display: 'flex' }}>
               {todayWake && <TimeBlock label="⏰ 기상" value={todayWake} flex />}
-              <TimeBlock
-                label={`🚗 출발${commuteMin ? ` · ${commuteMin}분` : ''}`}
-                value={commuteLoading ? null : todayDeparture}
-                flex
-              />
-              {todayShift === '당' && (
+              {todayShift === '당' ? (
+                <>
+                  <TimeBlock
+                    label={`🚗 출발${commuteMin ? ` · ${commuteMin}분` : ''}`}
+                    value={commuteLoading ? null : todayDeparture}
+                    flex
+                  />
+                  <TimeBlock
+                    label="🌙 익일 퇴근"
+                    value="09:00"
+                    sub={returnCommuteMin !== null ? `소요 ${returnCommuteMin}분` : (!selectedLocId ? '출발지 설정' : undefined)}
+                    color="#a5f3fc"
+                    flex
+                  />
+                </>
+              ) : (
                 <TimeBlock
-                  label="🌙 익일 퇴근"
-                  value="09:00"
-                  sub={returnCommuteMin !== null ? `소요 ${returnCommuteMin}분` : undefined}
-                  color="#a5f3fc"
+                  label={`🚗 지금 출발${commuteMin ? ` · ${commuteMin}분` : ''}`}
+                  value={commuteLoading ? null : nowStr}
+                  sub={nowWorkArrival ? `도착 ${nowWorkArrival}` : undefined}
                   flex
                 />
               )}
@@ -254,7 +264,7 @@ export default function Home({ onNavigate: _onNavigate }: HomeProps) {
               <TimeBlock
                 label="🏠 귀가 도착"
                 value={returnCommuteMin !== null ? addMins('09:00', returnCommuteMin) : null}
-                sub={returnCommuteMin !== null ? `소요 ${returnCommuteMin}분` : undefined}
+                sub={returnCommuteMin !== null ? `소요 ${returnCommuteMin}분` : (!selectedLocId ? '출발지 설정' : undefined)}
                 color="#a5f3fc"
                 flex
               />
