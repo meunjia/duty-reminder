@@ -30,4 +30,6 @@ body {
   display: flex;
   flex-direction: column;
   background-color: #f2f1ee;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
 }

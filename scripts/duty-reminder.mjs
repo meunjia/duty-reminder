@@ -56,6 +56,9 @@ function computeShift(startDate, startShift, overrides, dateStr) {
 async function sendToCalendarsWithShift(targetDate, targetShift, title, body) {
   const snap = await db.collection('calendars').get()
 
+  // 토큰→docRef 맵 (중복 토큰 제거)
+  const tokenMap = new Map() // token → docRef
+
   for (const calDoc of snap.docs) {
     const data = calDoc.data()
     const settings = data.settings ?? {}
@@ -66,17 +69,26 @@ async function sendToCalendarsWithShift(targetDate, targetShift, title, body) {
     if (shift !== targetShift) continue
 
     const tokensSnap = await calDoc.ref.collection('fcmTokens').get()
-    const tokens = tokensSnap.docs.map(d => d.data().token).filter(Boolean)
-    if (tokens.length === 0) continue
-
-    const response = await messaging.sendEachForMulticast({ tokens, notification: { title, body } })
-    console.log(`[${calDoc.id}] sent ${response.successCount}/${tokens.length}`)
-
-    const deletes = response.responses
-      .map((r, i) => (!r.success ? tokensSnap.docs[i].ref.delete() : null))
-      .filter(Boolean)
-    await Promise.all(deletes)
+    for (const doc of tokensSnap.docs) {
+      const token = doc.data().token
+      if (token && !tokenMap.has(token)) {
+        tokenMap.set(token, doc.ref)
+      }
+    }
   }
+
+  if (tokenMap.size === 0) { console.log('no tokens found'); return }
+
+  const tokens = [...tokenMap.keys()]
+  const refs = [...tokenMap.values()]
+
+  const response = await messaging.sendEachForMulticast({ tokens, notification: { title, body } })
+  console.log(`sent ${response.successCount}/${tokens.length}`)
+
+  const deletes = response.responses
+    .map((r, i) => (!r.success ? refs[i].delete() : null))
+    .filter(Boolean)
+  await Promise.all(deletes)
 }
 
 // KST 기준 오늘 날짜 계산
