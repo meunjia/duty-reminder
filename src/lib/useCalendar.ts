@@ -7,6 +7,13 @@ import { DEFAULT_CALENDAR_DATA } from './types'
 const CALENDAR_ID_KEY = 'shift_calendar_id'
 
 function getOrCreateCalendarId(): string {
+  // 공유 링크 ?cal=XXXX 로 접속한 경우 해당 캘린더로 전환
+  const params = new URLSearchParams(window.location.search)
+  const calFromUrl = params.get('cal')
+  if (calFromUrl) {
+    localStorage.setItem(CALENDAR_ID_KEY, calFromUrl)
+    return calFromUrl
+  }
   let id = localStorage.getItem(CALENDAR_ID_KEY)
   if (!id) {
     id = Math.random().toString(36).slice(2, 10)
