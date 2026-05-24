@@ -11,7 +11,7 @@ export async function geocodeAddress(address: string): Promise<{ lat: number; ln
   }
 }
 
-const TMAP_KEY = 'igdb75ThV77b5Xf65JYJU8wiDzaeVh5T6oF0EVw0'
+const TMAP_KEY = import.meta.env.VITE_TMAP_KEY as string
 
 // Tmap 경로 조회 → 소요 시간(분) 반환
 export async function getTmapDuration(params: {
@@ -20,7 +20,6 @@ export async function getTmapDuration(params: {
   departureTime: string  // HH:MM
 }): Promise<number | null> {
   const { originLat, originLng, destLat, destLng, departureTime } = params
-  const tmapKey = TMAP_KEY
 
   const now = new Date()
   const [hh, mm] = departureTime.split(':')
@@ -29,7 +28,7 @@ export async function getTmapDuration(params: {
   try {
     const res = await fetch('https://apis.openapi.sk.com/tmap/routes?version=1', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', appKey: tmapKey },
+      headers: { 'Content-Type': 'application/json', appKey: TMAP_KEY },
       body: JSON.stringify({
         startX: String(originLng), startY: String(originLat),
         endX: String(destLng), endY: String(destLat),

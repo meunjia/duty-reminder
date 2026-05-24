@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useCalendar } from '../lib/useCalendar'
 import type { CalendarSettings, SavedLocation } from '../lib/types'
 import { geocodeAddress } from '../utils/geocode'
@@ -17,6 +17,7 @@ export default function Settings() {
   const [notifPerm, setNotifPerm] = useState<NotificationPermission>(() => getPermissionState())
   const [notifEnabled, setNotifEnabled] = useState(() => isNotificationsEnabled())
   const [notifLoading, setNotifLoading] = useState(false)
+  const [notifError, setNotifError] = useState('')
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isFirstLoad = useRef(true)
 
@@ -192,14 +193,21 @@ export default function Settings() {
             <button
               onClick={async () => {
                 setNotifLoading(true)
+                setNotifError('')
                 const result = await enableNotifications(calendarId)
                 setNotifLoading(false)
                 if (result === 'ok') { setNotifPerm('granted'); setNotifEnabled(true) }
                 else if (result === 'denied') setNotifPerm('denied')
+                else setNotifError(result)
               }}
               disabled={notifLoading}
               style={{ ...btnSt, background: notifLoading ? '#aaa' : '#0C447C', padding: 12 }}
             >{notifLoading ? '처리 중...' : '🔔 알림 허용하기'}</button>
+            {notifError && (
+              <p style={{ fontSize: 11, color: '#E24B4A', margin: 0, wordBreak: 'break-all' }}>
+                {notifError}
+              </p>
+            )}
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -286,8 +294,6 @@ function merge(raw: Partial<CalendarSettings>): CalendarSettings {
     locations: raw.locations ?? [],
   }
 }
-
-import React from 'react'
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
