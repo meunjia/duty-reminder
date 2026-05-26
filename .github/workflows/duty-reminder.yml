@@ -1,8 +1,9 @@
 name: Duty Reminder
 
 on:
-  repository_dispatch:
-    types: [duty1, duty2, test]
+  schedule:
+    - cron: '50 8 * * *'   # duty1: 17:50 KST (08:50 UTC)
+    - cron: '10 23 * * *'  # duty2: 08:10 KST (23:10 UTC 전날)
   workflow_dispatch:
     inputs:
       mode:
@@ -26,8 +27,12 @@ jobs:
 
       - name: Run reminder
         run: |
-          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            node duty-reminder.mjs ${{ github.event.action }}
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            if [ "${{ github.event.schedule }}" = "50 8 * * *" ]; then
+              node duty-reminder.mjs duty1
+            else
+              node duty-reminder.mjs duty2
+            fi
           else
             node duty-reminder.mjs ${{ github.event.inputs.mode }}
           fi
