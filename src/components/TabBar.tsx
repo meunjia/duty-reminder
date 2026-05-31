@@ -1,4 +1,4 @@
-type Tab = 'home' | 'calendar' | 'settings'
+type Tab = 'home' | 'calendar' | 'chat' | 'settings'
 
 interface TabBarProps {
   active: Tab
@@ -9,11 +9,12 @@ export default function TabBar({ active, onChange }: TabBarProps) {
   const tabs: { id: Tab; label: string; icon: string }[] = [
     { id: 'home', label: '홈', icon: '🏠' },
     { id: 'calendar', label: '캘린더', icon: '📅' },
+    { id: 'chat', label: '채팅', icon: '💬' },
     { id: 'settings', label: '설정', icon: '⚙️' },
   ]
 
   return (
-    <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-white border-t border-gray-200 flex z-50">
+    <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-white border-t border-gray-200 flex z-50" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
       {tabs.map((tab) => (
         <button
           key={tab.id}

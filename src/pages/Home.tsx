@@ -1,20 +1,22 @@
 import { useState, useEffect } from 'react'
-import { useCalendar } from '../lib/useCalendar'
-import { getShiftForDate } from '../utils/shiftEngine'
+import { useCalendarContext } from '../lib/CalendarContext'
+import { getShiftForDate, toDateString as toKey } from '../utils/shiftEngine'
 import { fetchWeather, getOutfitShort, type WeatherData } from '../utils/weather'
 import { getTmapDuration } from '../utils/geocode'
 import type { ShiftType, Todo } from '../lib/types'
 import { DEFAULT_SETTINGS } from '../lib/types'
 import ShiftBadge from '../components/ShiftBadge'
 
+const BUILTIN_SHIFTS = new Set<string>(['교1', '교2', '당', '비', '전진배치', '중요업무', '자가대기'])
+function toBuiltin(s: string): ShiftType {
+  return BUILTIN_SHIFTS.has(s) ? (s as ShiftType) : '비'
+}
+
 type Tab = 'home' | 'calendar' | 'settings'
 interface HomeProps { onNavigate: (tab: Tab) => void }
 
 const F = "'Noto Sans KR', sans-serif"
 
-function toKey(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
 function addDays(d: Date, n: number) { const r = new Date(d); r.setDate(r.getDate() + n); return r }
 
 function subtractMins(timeStr: string, mins: number): string {
@@ -48,10 +50,9 @@ function TimeBlock({ label, value, sub, color, dimmed, flex }: {
   )
 }
 
-// 날씨 뱃지 행 (옷차림 + extras) — 작게
 function WeatherBadges({ w }: { w: WeatherData }) {
   return (
-    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
       <span style={{ background: 'rgba(255,255,255,0.22)', fontSize: 11, borderRadius: 99, padding: '3px 9px', fontWeight: 600 }}>
         {getOutfitShort(w.temp)}
       </span>
@@ -65,12 +66,16 @@ function WeatherBadges({ w }: { w: WeatherData }) {
 }
 
 export default function Home({ onNavigate: _onNavigate }: HomeProps) {
-  const { data, loading, update } = useCalendar()
-  const [weather, setWeather] = useState<{ today: WeatherData; tomorrow: WeatherData } | null>(null)
+  const { data, loading, update } = useCalendarContext()
+  const [weather, setWeather] = useState<{ today: WeatherData; tomorrow: WeatherData } | null | 'error'>(null)
   const [selectedLocId, setSelectedLocId] = useState<string | null>(null)
   const [commuteMin, setCommuteMin] = useState<number | null>(null)
   const [commuteLoading, setCommuteLoading] = useState(false)
+  const [nowCommuteMin, setNowCommuteMin] = useState<number | null>(null)
+  const [tomorrowCommuteMin, setTomorrowCommuteMin] = useState<number | null>(null)
+  const [tomorrowCommuteLoading, setTomorrowCommuteLoading] = useState(false)
   const [returnCommuteMin, setReturnCommuteMin] = useState<number | null>(null)
+  const [nowReturnCommuteMin, setNowReturnCommuteMin] = useState<number | null>(null)
   const [nowStr, setNowStr] = useState(nowTimeStr)
 
   useEffect(() => {
@@ -83,36 +88,40 @@ export default function Home({ onNavigate: _onNavigate }: HomeProps) {
   const settings = {
     ...DEFAULT_SETTINGS, ...data.settings,
     arrivalTimes: { ...DEFAULT_SETTINGS.arrivalTimes, ...(data.settings.arrivalTimes ?? {}) },
-    wakeTimes: { ...DEFAULT_SETTINGS.wakeTimes, ...(data.settings.wakeTimes ?? {}) },
     retireTimes: { ...DEFAULT_SETTINGS.retireTimes, ...(data.settings.retireTimes ?? {}) },
     locations: data.settings.locations ?? [],
   }
   const { overrides, memos, todos } = data
 
   const yesterday = addDays(today, -1)
-  const todayShift: ShiftType = getShiftForDate(today, settings.startDate, settings.startShift, overrides)
-  const yesterdayShift: ShiftType = getShiftForDate(yesterday, settings.startDate, settings.startShift, overrides)
+  const todayShiftRaw = getShiftForDate(today, settings.startDate, settings.startShift, overrides)
+  const yesterdayShiftRaw = getShiftForDate(yesterday, settings.startDate, settings.startShift, overrides)
   const tomorrow = addDays(today, 1)
-  const tomorrowShift: ShiftType = getShiftForDate(tomorrow, settings.startDate, settings.startShift, overrides)
+  const tomorrowShiftRaw = getShiftForDate(tomorrow, settings.startDate, settings.startShift, overrides)
+  const todayShift: ShiftType = toBuiltin(todayShiftRaw)
+  const yesterdayShift: ShiftType = toBuiltin(yesterdayShiftRaw)
+  const tomorrowShift: ShiftType = toBuiltin(tomorrowShiftRaw)
   const isPostNightShift = todayShift === '비' && yesterdayShift === '당'
 
   const todayArrival = settings.arrivalTimes[todayShift as keyof typeof settings.arrivalTimes] ?? '09:00'
   const tomorrowArrival = settings.arrivalTimes[tomorrowShift as keyof typeof settings.arrivalTimes] ?? '09:00'
-  const todayWake = settings.wakeTimes[todayShift as keyof typeof settings.wakeTimes] ?? null
-  const tomorrowWake = settings.wakeTimes[tomorrowShift as keyof typeof settings.wakeTimes] ?? null
+  const prepareMinutes = settings.prepareMinutes ?? 60
 
   const isBeforeEleven = today.getHours() < 11
-  const needsDeparture = (s: ShiftType) => s !== '비'
+  const needsDeparture = (s: ShiftType) => s !== '비' && s !== '자가대기'
 
   const todayDeparture = commuteMin !== null && needsDeparture(todayShift) ? subtractMins(todayArrival, commuteMin) : null
-  const tomorrowDeparture = commuteMin !== null && needsDeparture(tomorrowShift) ? subtractMins(tomorrowArrival, commuteMin) : null
+  const tomorrowDeparture = tomorrowCommuteMin !== null && needsDeparture(tomorrowShift) ? subtractMins(tomorrowArrival, tomorrowCommuteMin) : null
 
-  const retireTime: string | null = (todayShift !== '비' && todayShift !== '당')
+  const todayWake = todayDeparture !== null ? subtractMins(todayDeparture, prepareMinutes) : null
+  const tomorrowWake = tomorrowDeparture !== null ? subtractMins(tomorrowDeparture, prepareMinutes) : null
+
+  const retireTime: string | null = (todayShift !== '비' && todayShift !== '당' && todayShift !== '자가대기')
     ? (settings.retireTimes[todayShift as keyof typeof settings.retireTimes] ?? null)
     : null
   const retireHomeArrival = retireTime !== null && returnCommuteMin !== null ? addMins(retireTime, returnCommuteMin) : null
-  const nowHomeArrival = returnCommuteMin !== null ? addMins(nowStr, returnCommuteMin) : null
-  const nowWorkArrival = commuteMin !== null ? addMins(nowStr, commuteMin) : null
+  const nowHomeArrival = (nowReturnCommuteMin ?? returnCommuteMin) !== null ? addMins(nowStr, (nowReturnCommuteMin ?? returnCommuteMin)!) : null
+  const nowWorkArrival = (nowCommuteMin ?? commuteMin) !== null ? addMins(nowStr, (nowCommuteMin ?? commuteMin)!) : null
 
   const weekDays = Array.from({ length: 7 }, (_, i) => {
     const d = addDays(today, i)
@@ -122,6 +131,7 @@ export default function Home({ onNavigate: _onNavigate }: HomeProps) {
       label: ['월', '화', '수', '목', '금', '토', '일'][((d.getDay() + 6) % 7)],
     }
   })
+  const customShifts = settings.customShifts ?? []
 
   const DOW = ['일', '월', '화', '수', '목', '금', '토']
   const dateLabel = `${today.getMonth() + 1}월 ${today.getDate()}일 ${DOW[today.getDay()]}요일`
@@ -129,7 +139,7 @@ export default function Home({ onNavigate: _onNavigate }: HomeProps) {
   useEffect(() => {
     const lat = settings.workplaceLat ?? 37.5665
     const lng = settings.workplaceLng ?? 126.9780
-    fetchWeather(lat, lng).then(setWeather).catch(() => {})
+    fetchWeather(lat, lng).then(setWeather).catch(() => setWeather('error'))
   }, [settings.workplaceLat, settings.workplaceLng])
 
   const validLocs = settings.locations.filter(l => l.lat !== 0)
@@ -144,18 +154,48 @@ export default function Home({ onNavigate: _onNavigate }: HomeProps) {
     }
   }, [loading, settings.defaultLocationId])
 
+  // 오늘 출근 예정 소요시간 (2단계 수렴)
   useEffect(() => {
-    if (!selectedLocId || !settings.workplaceLat) { setCommuteMin(null); return }
+    if (!selectedLocId || !settings.workplaceLat || !needsDeparture(todayShift)) { setCommuteMin(null); return }
     const loc = validLocs.find(l => l.id === selectedLocId)
     if (!loc) return
     setCommuteLoading(true)
-    const estimatedDep = subtractMins(todayArrival, 60)
-    getTmapDuration({ originLat: loc.lat, originLng: loc.lng, destLat: settings.workplaceLat!, destLng: settings.workplaceLng!, departureTime: estimatedDep })
-      .then(min => { setCommuteMin(min); setCommuteLoading(false) })
+    const args = { originLat: loc.lat, originLng: loc.lng, destLat: settings.workplaceLat!, destLng: settings.workplaceLng! }
+    getTmapDuration({ ...args, departureTime: subtractMins(todayArrival, 60) })
+      .then(min1 => min1 !== null ? getTmapDuration({ ...args, departureTime: subtractMins(todayArrival, min1) }) : null)
+      .then(min2 => { setCommuteMin(min2); setCommuteLoading(false) })
       .catch(() => { setCommuteMin(null); setCommuteLoading(false) })
-  }, [selectedLocId, todayArrival, settings.workplaceLat, settings.workplaceLng])
+  }, [selectedLocId, todayArrival, todayShift, settings.workplaceLat, settings.workplaceLng])
 
-  // 퇴근 방향 소요시간 (회사→집): 당직/당직다음비번은 09:00 기준, 일반 오후는 퇴근시간 기준
+  // 지금 출발 → 회사 도착 예정 (현재 시간 기준 실시간)
+  useEffect(() => {
+    if (!selectedLocId || !settings.workplaceLat || !isBeforeEleven || !needsDeparture(todayShift) || isPostNightShift) {
+      setNowCommuteMin(null); return
+    }
+    const loc = validLocs.find(l => l.id === selectedLocId)
+    if (!loc) return
+    getTmapDuration({ originLat: loc.lat, originLng: loc.lng, destLat: settings.workplaceLat!, destLng: settings.workplaceLng!, departureTime: nowTimeStr() })
+      .then(setNowCommuteMin)
+      .catch(() => setNowCommuteMin(null))
+  }, [selectedLocId, settings.workplaceLat, settings.workplaceLng, isBeforeEleven, todayShift, isPostNightShift])
+
+  // 내일 출근 소요시간 — 내일 날짜 + 예정 출발시간 기준 (2단계 수렴)
+  useEffect(() => {
+    if (!selectedLocId || !settings.workplaceLat || !needsDeparture(tomorrowShift)) {
+      setTomorrowCommuteMin(null); setTomorrowCommuteLoading(false); return
+    }
+    const loc = validLocs.find(l => l.id === selectedLocId)
+    if (!loc) return
+    setTomorrowCommuteLoading(true)
+    const args = { originLat: loc.lat, originLng: loc.lng, destLat: settings.workplaceLat!, destLng: settings.workplaceLng!, departureDate: tomorrow }
+    getTmapDuration({ ...args, departureTime: subtractMins(tomorrowArrival, 60) })
+      .then(min1 => min1 !== null ? getTmapDuration({ ...args, departureTime: subtractMins(tomorrowArrival, min1) }) : null)
+      .then(min2 => { setTomorrowCommuteMin(min2); setTomorrowCommuteLoading(false) })
+      .catch(() => { setTomorrowCommuteMin(null); setTomorrowCommuteLoading(false) })
+  }, [selectedLocId, tomorrowArrival, tomorrowShift, settings.workplaceLat, settings.workplaceLng])
+
+  // 퇴근 방향 소요시간 (회사→집)
+  // 당직: 내일 09:00 퇴근 / isPostNightShift: 오늘 09:00 퇴근 / 일반 오후: 퇴근시간 기준
   useEffect(() => {
     const isNightShift = todayShift === '당' || isPostNightShift
     const isRegularAfternoon = !isBeforeEleven && todayShift !== '비' && todayShift !== '당'
@@ -165,17 +205,28 @@ export default function Home({ onNavigate: _onNavigate }: HomeProps) {
     const loc = validLocs.find(l => l.id === selectedLocId)
     if (!loc) return
     const deptTime = isNightShift ? '09:00' : (retireTime ?? '18:00')
-    getTmapDuration({ originLat: settings.workplaceLat!, originLng: settings.workplaceLng!, destLat: loc.lat, destLng: loc.lng, departureTime: deptTime })
+    const depDate = todayShift === '당' ? tomorrow : undefined
+    getTmapDuration({ originLat: settings.workplaceLat!, originLng: settings.workplaceLng!, destLat: loc.lat, destLng: loc.lng, departureTime: deptTime, departureDate: depDate })
       .then(setReturnCommuteMin)
       .catch(() => setReturnCommuteMin(null))
   }, [todayShift, isPostNightShift, isBeforeEleven, retireTime, selectedLocId, settings.workplaceLat, settings.workplaceLng])
 
-  function openAlarm() { window.location.href = 'clock://' }
+  // 지금 출발 → 귀가 도착 예정 (오후 일반 교번, 현재 시간 기준 실시간)
+  useEffect(() => {
+    const isRegularAfternoon = !isBeforeEleven && todayShift !== '비' && todayShift !== '당' && !isPostNightShift
+    if (!isRegularAfternoon || !selectedLocId || !settings.workplaceLat) { setNowReturnCommuteMin(null); return }
+    const loc = validLocs.find(l => l.id === selectedLocId)
+    if (!loc) return
+    getTmapDuration({ originLat: settings.workplaceLat!, originLng: settings.workplaceLng!, destLat: loc.lat, destLng: loc.lng, departureTime: nowTimeStr() })
+      .then(setNowReturnCommuteMin)
+      .catch(() => setNowReturnCommuteMin(null))
+  }, [selectedLocId, settings.workplaceLat, settings.workplaceLng, isBeforeEleven, todayShift, isPostNightShift])
 
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 80 }}><span style={{ color: '#aaa', fontFamily: F }}>불러오는 중...</span></div>
 
-  const todayW = weather?.today
-  const tmrW = weather?.tomorrow
+  const todayW = weather && weather !== 'error' ? weather.today : null
+  const tmrW = weather && weather !== 'error' ? weather.tomorrow : null
+  const weatherFailed = weather === 'error'
 
   return (
     <div style={{ fontFamily: F, display: 'flex', flexDirection: 'column', gap: 10, padding: '10px 12px 80px', background: '#eeecea', minHeight: '100svh' }}>
@@ -187,12 +238,12 @@ export default function Home({ onNavigate: _onNavigate }: HomeProps) {
         <p style={{ fontSize: 13, fontWeight: 500, opacity: 0.7, margin: '0 0 10px' }}>{dateLabel}</p>
 
         {/* ── 오늘 패널 ── */}
-        <div style={{ background: 'rgba(255,255,255,0.16)', borderRadius: 16, padding: '12px 14px', marginBottom: 8 }}>
+        <div style={{ background: 'rgba(255,255,255,0.16)', borderRadius: 16, padding: '5px 14px', marginBottom: 8 }}>
 
           {/* 헤더행: [뱃지] "오늘"  |  날씨아이콘 기온 ↑↓ */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 3 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <ShiftBadge shift={todayShift} size="md" />
+              <ShiftBadge shift={todayShiftRaw} size="md" customShifts={customShifts} />
               <span style={{ fontSize: 17, fontWeight: 800, opacity: 1 }}>오늘</span>
             </div>
             {todayW ? (
@@ -204,7 +255,7 @@ export default function Home({ onNavigate: _onNavigate }: HomeProps) {
                 <p style={{ fontSize: 12, opacity: 0.58, margin: '3px 0 0' }}>↑{todayW.tempMax}° ↓{todayW.tempMin}°</p>
               </div>
             ) : (
-              <span style={{ fontSize: 11, opacity: 0.3 }}>날씨 로딩...</span>
+              <span style={{ fontSize: 11, opacity: 0.3 }}>{weatherFailed ? '날씨 오류' : '날씨 로딩...'}</span>
             )}
           </div>
 
@@ -212,7 +263,7 @@ export default function Home({ onNavigate: _onNavigate }: HomeProps) {
           {todayW && <WeatherBadges w={todayW} />}
 
           {/* 구분선 */}
-          <div style={{ height: 1, background: 'rgba(255,255,255,0.15)', margin: '0 0 12px' }} />
+          <div style={{ height: 1, background: 'rgba(255,255,255,0.15)', margin: '0 0 8px' }} />
 
           {/* 상태행 */}
           {isPostNightShift && isBeforeEleven ? (
@@ -229,15 +280,18 @@ export default function Home({ onNavigate: _onNavigate }: HomeProps) {
             </div>
           ) : todayShift === '비' ? (
             <p style={{ fontSize: 19, fontWeight: 700, opacity: 0.88, margin: 0 }}>🏖️ 비번</p>
+          ) : todayShift === '자가대기' ? (
+            <p style={{ fontSize: 19, fontWeight: 700, opacity: 0.88, margin: 0 }}>🏠 자가대기</p>
           ) : isBeforeEleven ? (
-            // 오전: 기상 + (당직이면 출발+익일퇴근, 아니면 지금출발→도착예정)
+            // 오전: 기상 + (당직이면 도착목표, 아니면 지금출발→도착예정)
             <div style={{ display: 'flex' }}>
               {todayWake && <TimeBlock label="⏰ 기상" value={todayWake} flex />}
               {todayShift === '당' ? (
                 <>
                   <TimeBlock
-                    label={`🚗 출발${commuteMin ? ` · ${commuteMin}분` : ''}`}
-                    value={commuteLoading ? null : todayDeparture}
+                    label="🏢 도착목표"
+                    value={todayArrival}
+                    sub={commuteMin ? `출발 ${todayDeparture ?? '—'} · ${commuteMin}분` : (!selectedLocId ? '출발지 설정' : undefined)}
                     flex
                   />
                   <TimeBlock
@@ -250,9 +304,9 @@ export default function Home({ onNavigate: _onNavigate }: HomeProps) {
                 </>
               ) : (
                 <TimeBlock
-                  label={`🚗 지금 출발${commuteMin ? ` · ${commuteMin}분` : ''}`}
-                  value={commuteLoading ? null : nowStr}
-                  sub={nowWorkArrival ? `도착 ${nowWorkArrival}` : undefined}
+                  label={`🏢 도착 예정${commuteMin ? ` · ${commuteMin}분` : ''}`}
+                  value={commuteLoading ? null : nowWorkArrival}
+                  sub={`출발 ${nowStr}`}
                   flex
                 />
               )}
@@ -270,33 +324,32 @@ export default function Home({ onNavigate: _onNavigate }: HomeProps) {
               />
             </div>
           ) : (
-            // 오후 일반: 퇴근 예정 시간 + 지금 출발시
+            // 오후 일반: 퇴근 후 귀가 도착 + 지금 출발시 귀가 도착
             <div style={{ display: 'flex' }}>
               <TimeBlock
-                label="🏢 퇴근 예정"
-                value={retireTime}
-                sub={retireHomeArrival ? `도착 ${retireHomeArrival}` : undefined}
+                label={retireTime ? `🏠 귀가 도착 (퇴근 ${retireTime})` : '🏠 귀가 도착'}
+                value={retireHomeArrival}
+                sub={!selectedLocId ? '출발지 설정' : undefined}
                 flex
               />
               <TimeBlock
-                label="🚗 지금 출발"
-                value={nowStr}
-                sub={nowHomeArrival ? `도착 ${nowHomeArrival}` : undefined}
+                label="🚗 지금 출발시"
+                value={nowHomeArrival}
+                sub={`출발 ${nowStr}`}
                 flex
               />
             </div>
           )}
         </div>
 
-        {/* ── 내일 패널 (button → 알람앱) ── */}
-        <button
-          onClick={openAlarm}
-          style={{ width: '100%', background: 'rgba(0,10,40,0.30)', borderRadius: 16, padding: '12px 14px', border: '1px solid rgba(255,255,255,0.10)', cursor: 'pointer', textAlign: 'left', color: '#fff', marginBottom: 10, boxSizing: 'border-box' }}
+        {/* ── 내일 패널 ── */}
+        <div
+          style={{ width: '100%', background: 'rgba(0,10,40,0.30)', borderRadius: 16, padding: '8px 14px', border: '1px solid rgba(255,255,255,0.10)', textAlign: 'left', color: '#fff', marginBottom: 10, boxSizing: 'border-box' }}
         >
           {/* 헤더행: [뱃지] "내일 · 요일"  |  날씨아이콘 기온 ↑↓  탭→알람 */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 5 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <ShiftBadge shift={tomorrowShift} size="md" />
+              <ShiftBadge shift={tomorrowShiftRaw} size="md" customShifts={customShifts} />
               <span style={{ fontSize: 17, fontWeight: 800, opacity: 1 }}>내일 · {DOW[tomorrow.getDay()]}요일</span>
             </div>
             <div style={{ textAlign: 'right' }}>
@@ -307,11 +360,10 @@ export default function Home({ onNavigate: _onNavigate }: HomeProps) {
                     <span style={{ fontSize: 34, fontWeight: 900, lineHeight: 1 }}>{tmrW.temp}°</span>
                   </>
                 ) : (
-                  <span style={{ fontSize: 11, opacity: 0.3 }}>날씨 로딩...</span>
+                  <span style={{ fontSize: 11, opacity: 0.3 }}>{weatherFailed ? '날씨 오류' : '날씨 로딩...'}</span>
                 )}
               </div>
               {tmrW && <p style={{ fontSize: 11, opacity: 0.55, margin: '3px 0 0' }}>↑{tmrW.tempMax}° ↓{tmrW.tempMin}°</p>}
-              <span style={{ fontSize: 10, opacity: 0.28 }}>탭→알람</span>
             </div>
           </div>
 
@@ -324,18 +376,20 @@ export default function Home({ onNavigate: _onNavigate }: HomeProps) {
           {/* 시간행 — 비번이면 텍스트, 아니면 가로 3-컬럼 */}
           {tomorrowShift === '비' ? (
             <p style={{ fontSize: 19, fontWeight: 700, opacity: 0.88, margin: 0 }}>🏖️ 비번</p>
+          ) : tomorrowShift === '자가대기' ? (
+            <p style={{ fontSize: 19, fontWeight: 700, opacity: 0.88, margin: 0 }}>🏠 자가대기</p>
           ) : (
             <div style={{ display: 'flex' }}>
               {tomorrowWake && <TimeBlock label="⏰ 기상" value={tomorrowWake} flex />}
               <TimeBlock
-                label={`🚗 출발${commuteMin ? ` · ${commuteMin}분` : ''}`}
-                value={tomorrowDeparture}
+                label={`🚗 출발${tomorrowCommuteMin ? ` · ${tomorrowCommuteMin}분` : ''}`}
+                value={tomorrowCommuteLoading ? null : tomorrowDeparture}
                 flex
               />
               <TimeBlock label="🏢 도착목표" value={tomorrowArrival} flex />
             </div>
           )}
-        </button>
+        </div>
 
         {/* ── 출발지 탭 ── */}
         {validLocs.length > 0 && (
@@ -357,7 +411,7 @@ export default function Home({ onNavigate: _onNavigate }: HomeProps) {
                   </button>
                 )
               })}
-              {selectedLocId && (
+              {selectedLocId && needsDeparture(todayShift) && (
                 <span style={{ fontSize: 13, opacity: 0.85, marginLeft: 2, fontWeight: 600 }}>
                   {commuteLoading ? '계산 중...' : commuteMin !== null ? `${commuteMin}분 소요` : '계산 실패'}
                 </span>
@@ -375,6 +429,7 @@ export default function Home({ onNavigate: _onNavigate }: HomeProps) {
             const isToday = key === todayKey
             const dayMemos = memos[key] ?? []
             const dow = date.getDay()
+            const firstMemo = dayMemos[0]
             return (
               <div key={key} style={{
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
@@ -389,8 +444,12 @@ export default function Home({ onNavigate: _onNavigate }: HomeProps) {
                   width: 22, height: 22,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>{date.getDate()}</span>
-                <ShiftBadge shift={shift} size="sm" />
-                {dayMemos[0] && <span style={{ fontSize: 7, color: '#378ADD', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 36, textAlign: 'center' }}>{dayMemos[0]}</span>}
+                <ShiftBadge shift={shift} size="sm" customShifts={customShifts} />
+                {firstMemo && (
+                  <span style={{ fontSize: 7, color: firstMemo.color ?? '#378ADD', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 36, textAlign: 'center' }}>
+                    {firstMemo.text}
+                  </span>
+                )}
               </div>
             )
           })}
